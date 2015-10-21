@@ -282,7 +282,7 @@ exports.grouplist = [
 		roomvoice: true,
 		modchat: true,
 		roomonly: true,
-		editroom: true,
+		privateroom: true,
 		joinbattle: true
 	},
 	{
