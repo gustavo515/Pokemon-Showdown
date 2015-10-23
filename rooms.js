@@ -8,6 +8,9 @@
  *
  * @license MIT license
  */
+ 
+var chatRoomsDataFile = (process.env.OPENSHIFT_DATA_DIR) ? process.env.OPENSHIFT_DATA_DIR + 'chatrooms.json' : './config/chatrooms.json';
+var chatRoomsDataFile0 = (process.env.OPENSHIFT_DATA_DIR) ? process.env.OPENSHIFT_DATA_DIR + 'chatrooms.json.0' : './config/chatrooms.json.0';
 
 const TIMEOUT_EMPTY_DEALLOCATE = 10 * 60 * 1000;
 const TIMEOUT_INACTIVE_DEALLOCATE = 40 * 60 * 1000;
@@ -174,7 +177,7 @@ var Room = (function () {
 
 		var timeUntilExpire = this.muteQueue[0].time - Date.now();
 		if (timeUntilExpire <= 0) {
-			this.unmute(this.muteQueue[0].userid, "Your mute in '" + this.title + "' has expired.");
+			this.unmute(this.muteQueue[0].userid, true);
 			//runMuteTimer() is called again in unmute() so this function instance should be closed
 			return;
 		}
@@ -240,7 +243,7 @@ var Room = (function () {
 		user.updateIdentity(this.id);
 		return userid;
 	};
-	Room.prototype.unmute = function (userid, notifyText) {
+	Room.prototype.unmute = function (userid, sendPopup) {
 		var successUserid = false;
 		var user = Users(userid);
 		if (!user) {
@@ -269,9 +272,9 @@ var Room = (function () {
 			}
 		}
 
-		if (successUserid && user in this.users) {
+		if (user.connected && successUserid) {
 			user.updateIdentity(this.id);
-			if (notifyText) user.popup(notifyText);
+			if (sendPopup) user.popup("Your mute in " + this.title + " has expired.");
 		}
 		return successUserid;
 	};
@@ -296,7 +299,7 @@ var GlobalRoom = (function () {
 
 		this.chatRoomData = [];
 		try {
-			this.chatRoomData = require('./config/chatrooms.json');
+			this.chatRoomData = JSON.parse(fs.readFileSync(chatRoomsDataFile));
 			if (!Array.isArray(this.chatRoomData)) this.chatRoomData = [];
 		} catch (e) {} // file doesn't exist [yet]
 
@@ -385,12 +388,12 @@ var GlobalRoom = (function () {
 				}
 				writing = true;
 				var data = JSON.stringify(self.chatRoomData).replace(/\{"title"\:/g, '\n{"title":').replace(/\]$/, '\n]');
-				fs.writeFile('config/chatrooms.json.0', data, function () {
+				fs.writeFile(chatRoomsDataFile0, data, function () {
 					// rename is atomic on POSIX, but will throw an error on Windows
-					fs.rename('config/chatrooms.json.0', 'config/chatrooms.json', function (err) {
+					fs.rename(chatRoomsDataFile0, chatRoomsDataFile, function (err) {
 						if (err) {
 							// This should only happen on Windows.
-							fs.writeFile('config/chatrooms.json', data, finishWriting);
+							fs.writeFile(chatRoomsDataFile, data, finishWriting);
 							return;
 						}
 						finishWriting();
@@ -658,7 +661,7 @@ var GlobalRoom = (function () {
 			title: title
 		};
 		var room = Rooms.createChatRoom(id, title, chatRoomData);
-		this.chatRoomData.push(chatRoomData);
+		// Only add room to chatRoomData if it is not a personal room, those aren't saved.
 		this.chatRooms.push(room);
 		this.writeChatRoomData();
 		return true;
@@ -1401,11 +1404,6 @@ var BattleRoom = (function () {
 		}
 		this.expireTimer = null;
 
-		if (this.muteTimer) {
-			clearTimeout(this.muteTimer);
-		}
-		this.muteTimer = null;
-
 		// get rid of some possibly-circular references
 		delete rooms[this.id];
 	};
@@ -1434,7 +1432,7 @@ var ChatRoom = (function () {
 			};
 			this.logEntry('NEW CHATROOM: ' + this.id);
 			if (Config.loguserstats) {
-				this.logUserStatsInterval = setInterval(this.logUserStats.bind(this), Config.loguserstats);
+				setInterval(this.logUserStats.bind(this), Config.loguserstats);
 			}
 		}
 
@@ -1589,22 +1587,26 @@ var ChatRoom = (function () {
 	ChatRoom.prototype.tryExpire = function () {
 		this.destroy();
 	};
-	ChatRoom.prototype.getIntroMessage = function (user) {
-		var message = '';
-		if (this.introMessage) message += '\n|raw|<div class="infobox"><div' + (!this.isOfficial ? ' class="infobox-limited"' : '') + '>' + this.introMessage + '</div>';
-		if (this.staffMessage && user.can('mute', null, this)) message += (message ? '<br />' : '\n|raw|<div class="infobox">') + '(Staff intro:)<br /><div>' + this.staffMessage + '</div>';
-		if (this.modchat) {
-			message += (message ? '<br />' : '\n|raw|<div class="infobox">') + '<div class="broadcast-red">' +
+	ChatRoom.prototype.getIntroMessage = function () {
+		if (this.modchat && this.introMessage) {
+			return '\n|raw|<div class="infobox"><div' + (!this.isOfficial ? ' class="infobox-limited"' : '') + '>' + this.introMessage + '</div>' +
+				'<br />' +
+				'<div class="broadcast-red">' +
 				'Must be rank ' + this.modchat + ' or higher to talk right now.' +
-				'</div>';
+				'</div></div>';
 		}
-		if (message) message += '</div>';
-		return message;
+
+		if (this.modchat) {
+			return '\n|raw|<div class="infobox"><div class="broadcast-red">' +
+				'Must be rank ' + this.modchat + ' or higher to talk right now.' +
+				'</div></div>';
+		}
+		if (this.introMessage) return '\n|raw|<div class="infobox"><div' + (!this.isOfficial ? ' class="infobox-limited"' : '') + '>' + this.introMessage + '</div></div>';
+		return '';
 	};
 	ChatRoom.prototype.onJoinConnection = function (user, connection) {
 		var userList = this.userList ? this.userList : this.getUserList();
-		this.sendUser(connection, '|init|chat\n|title|' + this.title + '\n' + userList + '\n' + this.getLogSlice(-25).join('\n') + this.getIntroMessage(user));
-		if (this.poll) this.poll.display(user, false);
+		this.sendUser(connection, '|init|chat\n|title|' + this.title + '\n' + userList + '\n' + this.getLogSlice(-25).join('\n') + this.getIntroMessage());
 		if (global.Tournaments && Tournaments.get(this.id)) {
 			Tournaments.get(this.id).updateFor(user, connection);
 		}
@@ -1618,8 +1620,8 @@ var ChatRoom = (function () {
 
 		if (!merging) {
 			var userList = this.userList ? this.userList : this.getUserList();
-			this.sendUser(connection, '|init|chat\n|title|' + this.title + '\n' + userList + '\n' + this.getLogSlice(-100).join('\n') + this.getIntroMessage(user));
-			if (this.poll) this.poll.display(user, false);
+			this.sendUser(connection, '|init|chat\n|title|' + this.title + '\n' + userList + '\n' + this.getLogSlice(-100).join('\n') + this.getIntroMessage());
+
 			if (global.Tournaments && Tournaments.get(this.id)) {
 				Tournaments.get(this.id).updateFor(user, connection);
 			}
@@ -1644,7 +1646,6 @@ var ChatRoom = (function () {
 			} else {
 				entry = '|J|' + user.getIdentity(this.id);
 			}
-			if (this.staffMessage && user.can('mute', null, this)) this.sendUser(user, '|raw|<div class="infobox">(Staff intro:)<br /><div>' + this.staffMessage + '</div></div>');
 		} else if (!user.named) {
 			entry = '|L| ' + oldid;
 		} else {
@@ -1705,20 +1706,6 @@ var ChatRoom = (function () {
 			}
 		}
 
-		// Clear any active timers for the room
-		if (this.muteTimer) {
-			clearTimeout(this.muteTimer);
-		}
-		this.muteTimer = null;
-		if (this.reportJoinsInterval) {
-			clearTimeout(this.reportJoinsInterval);
-		}
-		this.reportJoinsInterval = null;
-		if (this.logUserStatsInterval) {
-			clearTimeout(this.logUserStatsInterval);
-		}
-		this.logUserStatsInterval = null;
-
 		// get rid of some possibly-circular references
 		delete rooms[this.id];
 	};
@@ -1745,8 +1732,8 @@ Rooms.createBattle = function (roomid, format, p1, p2, options) {
 	if (!roomid) roomid = 'default';
 	if (!rooms[roomid]) {
 		// console.log("NEW BATTLE ROOM: " + roomid);
-		Monitor.countBattle(p1.latestIp, p1.name);
-		Monitor.countBattle(p2.latestIp, p2.name);
+		ResourceMonitor.countBattle(p1.latestIp, p1.name);
+		ResourceMonitor.countBattle(p2.latestIp, p2.name);
 		rooms[roomid] = new BattleRoom(roomid, format, p1, p2, options);
 	}
 	return rooms[roomid];

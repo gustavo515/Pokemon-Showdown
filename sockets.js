@@ -16,7 +16,7 @@ global.Config = require('./config/config');
 
 if (cluster.isMaster) {
 	cluster.setupMaster({
-		exec: require('path').resolve(__dirname, 'sockets.js')
+		exec: 'sockets.js'
 	});
 
 	var workers = exports.workers = {};
@@ -140,7 +140,8 @@ if (cluster.isMaster) {
 		});
 	}
 
-	var app = require('http').createServer();
+	var app = require('http').createServer(); 
+	var avatarsDir = (process.env.OPENSHIFT_DATA_DIR) ? process.env.OPENSHIFT_DATA_DIR : './config/avatars';
 	var appssl;
 	if (Config.ssl) {
 		appssl = require('https').createServer(Config.ssl.options);
@@ -149,7 +150,7 @@ if (cluster.isMaster) {
 		(function () {
 			var nodestatic = require('node-static');
 			var cssserver = new nodestatic.Server('./config');
-			var avatarserver = new nodestatic.Server('./config/avatars');
+			var avatarserver = new nodestatic.Server(avatarsDir);
 			var staticserver = new nodestatic.Server('./static');
 			var staticRequestHandler = function (request, response) {
 				// console.log("static rq: " + request.socket.remoteAddress + ":" + request.socket.remotePort + " -> " + request.socket.localAddress + ":" + request.socket.localPort + " - " + request.method + " " + request.url + " " + request.httpVersion + " - " + request.rawHeaders.join('|'));

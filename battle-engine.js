@@ -3058,6 +3058,8 @@ Battle = (function () {
 			}
 		}
 
+		this.add('turn', this.turn);
+
 		if (this.gameType === 'triples' && this.sides.map('pokemonLeft').count(1) === this.sides.length) {
 			// If both sides have one Pokemon left in triples and they are not adjacent, they are both moved to the center.
 			var center = false;
@@ -3072,9 +3074,6 @@ Battle = (function () {
 			}
 			if (center) this.add('-center');
 		}
-
-		this.add('turn', this.turn);
-
 		this.makeRequest('move');
 	};
 	Battle.prototype.start = function () {
@@ -3138,7 +3137,6 @@ Battle = (function () {
 		effect = this.getEffect(effect);
 		boost = this.runEvent('Boost', target, source, effect, Object.clone(boost));
 		var success = false;
-		var boosted = false;
 		for (var i in boost) {
 			var currentBoost = {};
 			currentBoost[i] = boost[i];
@@ -3164,10 +3162,6 @@ Battle = (function () {
 					if (effect.effectType === 'Move') {
 						this.add(msg, target, i, boost[i]);
 					} else {
-						if (effect.effectType === 'Ability' && !boosted) {
-							this.add('-activate', target, effect.fullname);
-							boosted = true;
-						}
 						this.add(msg, target, i, boost[i], '[from] ' + effect.fullname);
 					}
 					break;
@@ -3866,17 +3860,8 @@ Battle = (function () {
 		switch (decision.choice) {
 		case 'start':
 			// I GIVE UP, WILL WRESTLE WITH EVENT SYSTEM LATER
-			var format = this.getFormat();
-
-			if (format.onBegin) format.onBegin.call(this);
-
-			if (format.teamLength && format.teamLength.battle) {
-				// Trim the team: not all of the Pokémon brought to Preview will battle.
-				this.p1.pokemon = this.p1.pokemon.slice(0, format.teamLength.battle);
-				this.p1.pokemonLeft = this.p1.pokemon.length;
-				this.p2.pokemon = this.p2.pokemon.slice(0, format.teamLength.battle);
-				this.p2.pokemonLeft = this.p2.pokemon.length;
-			}
+			var beginCallback = this.getFormat().onBegin;
+			if (beginCallback) beginCallback.call(this);
 
 			this.add('start');
 			for (var pos = 0; pos < this.p1.active.length; pos++) {

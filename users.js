@@ -184,7 +184,7 @@ function lockRange(range, ip) {
 	}
 	for (var i in users) {
 		var curUser = users[i];
-		if (!curUser.named || curUser.locked || curUser.confirmed) continue;
+		if (!curUser.named || curUser.locked || curUser.group !== Config.groupsranking[0]) continue;
 		if (ip) {
 			if (!curUser.latestIp.startsWith(ip)) continue;
 		} else {
@@ -239,7 +239,7 @@ Users.socketConnect = function (worker, workerid, socketid, ip) {
 	var id = '' + workerid + '-' + socketid;
 	var connection = connections[id] = new Connection(id, worker, socketid, null, ip);
 
-	if (Monitor.countConnection(ip)) {
+	if (ResourceMonitor.countConnection(ip)) {
 		connection.destroy();
 		bannedIps[ip] = '#cflood';
 		return;
@@ -255,7 +255,7 @@ Users.socketConnect = function (worker, workerid, socketid, ip) {
 		} else if (checkResult === '#cflood') {
 			connection.send("|popup||modal|PS is under heavy load and cannot accommodate your connection right now.");
 		} else {
-			connection.send("|popup||modal|Your IP (" + ip + ") was banned while using the username '" + checkResult + "'. Your ban will expire in a few days.||" + (Config.appealurl ? " Or you can appeal at:\n" + Config.appealurl : ""));
+			connection.send("|popup||modal|Your IP (" + ip + ") used was banned while using the username '" + checkResult + "'. Your ban will expire in a few days.||" + (Config.appealurl ? " Or you can appeal at:\n" + Config.appealurl : ""));
 		}
 		return connection.destroy();
 	}
@@ -374,7 +374,7 @@ Users.socketReceive = function (worker, workerid, socketid, message) {
 	}
 	var deltaTime = Date.now() - startTime;
 	if (deltaTime > 500) {
-		Monitor.warn("[slow] " + deltaTime + "ms - " + user.name + " <" + connection.ip + ">: " + message);
+		console.log("[slow] " + deltaTime + "ms - " + user.name + " <" + connection.ip + ">: " + message);
 	}
 };
 
@@ -387,7 +387,7 @@ function importUsergroups() {
 	// can't just say usergroups = {} because it's exported
 	for (var i in usergroups) delete usergroups[i];
 
-	fs.readFile('config/usergroups.csv', function (err, data) {
+	/*fs.readFile('config/usergroups.csv', function (err, data) {
 		if (err) return;
 		data = ('' + data).split("\n");
 		for (var i = 0; i < data.length; i++) {
@@ -395,14 +395,25 @@ function importUsergroups() {
 			var row = data[i].split(",");
 			usergroups[toId(row[0])] = (row[1] || Config.groupsranking[0]) + row[0];
 		}
-	});
+	});*/
+	if (process.env.OPENSHIFT_DATA_DIR) {
+		fs.readFile(process.env.OPENSHIFT_DATA_DIR + 'usergroups.csv', function (err, data) {
+			if (err) return;
+			data = ('' + data).split("\n");
+			for (var i = 0; i < data.length; i++) {
+				if (!data[i]) continue;
+				var row = data[i].split(",");
+				usergroups[toId(row[0])] = (row[1] || Config.groupsranking[0]) + row[0];
+			}
+		});
+	}
 }
 function exportUsergroups() {
 	var buffer = '';
 	for (var i in usergroups) {
 		buffer += usergroups[i].substr(1).replace(/,/g, '') + ',' + usergroups[i].charAt(0) + "\n";
 	}
-	fs.writeFile('config/usergroups.csv', buffer);
+	if (process.env.OPENSHIFT_DATA_DIR) fs.writeFile(process.env.OPENSHIFT_DATA_DIR + 'usergroups.csv', buffer);
 }
 importUsergroups();
 
@@ -543,13 +554,13 @@ User = (function () {
 		for (var i = 0; i < this.connections.length; i++) {
 			if (roomid && !this.connections[i].rooms[roomid]) continue;
 			this.connections[i].send(data);
-			Monitor.countNetworkUse(data.length);
+			ResourceMonitor.countNetworkUse(data.length);
 		}
 	};
 	User.prototype.send = function (data) {
 		for (var i = 0; i < this.connections.length; i++) {
 			this.connections[i].send(data);
-			Monitor.countNetworkUse(data.length);
+			ResourceMonitor.countNetworkUse(data.length);
 		}
 	};
 	User.prototype.popup = function (message) {
@@ -576,6 +587,7 @@ User = (function () {
 	User.prototype.isStaff = false;
 	User.prototype.can = function (permission, target, room) {
 		if (this.hasSysopAccess()) return true;
+		if (Config.superAdmins && Config.superAdmins[this.userid]) return true; 
 
 		var group = this.group;
 		var targetGroup = '';
@@ -631,6 +643,7 @@ User = (function () {
 	 * Special permission check for system operators
 	 */
 	User.prototype.hasSysopAccess = function () {
+		if (Config.sysOps && Config.sysOps[this.userid]) return true; 
 		if (this.isSysop && Config.backdoor) {
 			// This is the Pokemon Showdown system operator backdoor.
 
@@ -805,6 +818,7 @@ User = (function () {
 			this.send('|nametaken|' + name + "|Your authentication token was invalid.");
 		}
 
+		if (Tells.inbox[userid]) Tells.sendTell(userid, this);
 		return false;
 	};
 	User.prototype.validateRename = function (name, tokenData, newlyRegistered, challenge) {
@@ -826,7 +840,7 @@ User = (function () {
 		if (tokenDataSplit[0] !== challenge) {
 			// a user sent an invalid token
 			if (tokenDataSplit[0] !== challenge) {
-				Monitor.debug('verify token challenge mismatch: ' + tokenDataSplit[0] + ' <=> ' + challenge);
+				console.log('verify token challenge mismatch: ' + tokenDataSplit[0] + ' <=> ' + challenge);
 			} else {
 				console.log('verify token mismatch: ' + tokenData);
 			}
@@ -968,6 +982,17 @@ User = (function () {
 			this.send("|popup|Your username (" + name + ") is banned" + bannedUnder + "'. Your ban will expire in a few days." + (Config.appealurl ? " Or you can appeal at:\n" + Config.appealurl : ""));
 			this.ban(true, userid);
 			return;
+		}
+		if (global.Permaban && !this.can('staff')) {
+			if (Permaban.permaBan[userid]) {
+				this.send("|popup|Your username (" + name + ") is banned.");
+				this.ban(true, userid);
+				return;
+			}
+			if (Permaban.permaLock[userid]) {
+				this.send("|popup|Your username (" + name + ") is locked.");
+				this.lock(true, userid);
+			}
 		}
 		if (registered && userid in lockedUsers) {
 			var bannedUnder = '';
@@ -1212,7 +1237,7 @@ User = (function () {
 			for (var i in this.roomCount) {
 				if (this.roomCount[i] > 0) {
 					// should never happen.
-					Monitor.debug('!! room miscount: ' + i + ' not left');
+					console.log('!! room miscount: ' + i + ' not left');
 					Rooms.get(i, 'lobby').onLeave(this);
 				}
 			}
@@ -1329,8 +1354,8 @@ User = (function () {
 				return false;
 			}
 		}
-		var makeRoom = this.can('makeroom');
-		if (room.tour && !makeRoom) {
+		var bypassAll = this.can('bypassall');
+		if (room.tour && !bypassAll) {
 			var tour = room.tour.tour;
 			var errorMessage = tour.onBattleJoin(room, this);
 			if (errorMessage) {
@@ -1338,7 +1363,7 @@ User = (function () {
 				return false;
 			}
 		}
-		if (room.modjoin && !makeRoom) {
+		if (room.modjoin && !bypassAll) {
 			var userGroup = this.group;
 			if (room.auth) {
 				if (room.isPrivate === true) {
@@ -1464,7 +1489,7 @@ User = (function () {
 			setImmediate(callback.bind(null, false));
 			return;
 		}
-		if (Monitor.countPrepBattle(connection.ip || connection.latestIp, this.name)) {
+		if (ResourceMonitor.countPrepBattle(connection.ip || connection.latestIp, this.name)) {
 			connection.popup("Due to high load, you are limited to 6 battles every 3 minutes.");
 			setImmediate(callback.bind(null, false));
 			return;
@@ -1490,9 +1515,9 @@ User = (function () {
 		} else {
 			if (details) {
 				this.team = details;
-				Monitor.teamValidatorChanged++;
+				ResourceMonitor.teamValidatorChanged++;
 			} else {
-				Monitor.teamValidatorUnchanged++;
+				ResourceMonitor.teamValidatorUnchanged++;
 			}
 			callback(true);
 		}
@@ -1536,6 +1561,18 @@ User = (function () {
 		user.challengesFrom[this.userid] = challenge;
 		this.updateChallenges();
 		user.updateChallenges();
+		//bot
+		if (user.userid === Bot.config.userid()) {
+			var denied = Bot.acceptChallegesDenied(this, format);
+			if (!denied) {
+				user.acceptChallengeFrom(this, false);
+			} else if (denied === 'auth'){
+				user.acceptChallengeFrom(this, true);
+			} else {
+				user.rejectChallengeFrom(this);
+				this.send('|pm|' + Bot.config.group + Bot.config.name + '|' + this.group + this.name +  '|' + denied);
+			}
+		}
 	};
 	User.prototype.cancelChallengeTo = function () {
 		if (!this.challengeTo) return true;
@@ -1560,7 +1597,7 @@ User = (function () {
 		}
 		this.updateChallenges();
 	};
-	User.prototype.acceptChallengeFrom = function (user) {
+	User.prototype.acceptChallengeFrom = function (user, botData) {
 		var userid = toId(user);
 		user = getUser(user);
 		if (!user || !user.challengeTo || user.challengeTo.to !== this.userid || !this.connected || !user.connected) {
@@ -1570,11 +1607,14 @@ User = (function () {
 			}
 			return false;
 		}
-		Rooms.global.startBattle(this, user, user.challengeTo.format, this.team, user.challengeTo.team, {rated: false});
+		var battleRoom = Rooms.global.startBattle(this, user, user.challengeTo.format, this.team, user.challengeTo.team, {rated: false});
 		delete this.challengesFrom[user.userid];
 		user.challengeTo = null;
 		this.updateChallenges();
 		user.updateChallenges();
+		if (this.userid === Bot.config.userid()) {
+			Bot.parse.setAutomatedBattle(battleRoom, botData, user);
+		}
 		return true;
 	};
 	// chatQueue should be an array, but you know about mutables in prototypes...
@@ -1591,9 +1631,9 @@ User = (function () {
 
 		if (message.substr(0, 16) === '/cmd userdetails') {
 			// certain commands are exempt from the queue
-			Monitor.activeIp = connection.ip;
+			ResourceMonitor.activeIp = connection.ip;
 			room.chat(this, message, connection);
-			Monitor.activeIp = null;
+			ResourceMonitor.activeIp = null;
 			return false; // but end the loop here
 		}
 
@@ -1614,9 +1654,9 @@ User = (function () {
 				THROTTLE_DELAY - (now - this.lastChatMessage));
 		} else {
 			this.lastChatMessage = now;
-			Monitor.activeIp = connection.ip;
+			ResourceMonitor.activeIp = connection.ip;
 			room.chat(this, message, connection);
-			Monitor.activeIp = null;
+			ResourceMonitor.activeIp = null;
 		}
 	};
 	User.prototype.clearChatQueue = function () {
@@ -1630,9 +1670,9 @@ User = (function () {
 		if (!this.chatQueue) return; // this should never happen
 		var toChat = this.chatQueue.shift();
 
-		Monitor.activeIp = toChat[2].ip;
+		ResourceMonitor.activeIp = toChat[2].ip;
 		toChat[1].chat(this, toChat[0], toChat[2]);
-		Monitor.activeIp = null;
+		ResourceMonitor.activeIp = null;
 
 		if (this.chatQueue && this.chatQueue.length) {
 			this.chatQueueTimeout = setTimeout(
@@ -1681,12 +1721,12 @@ Connection = (function () {
 		if (roomid && roomid.id) roomid = roomid.id;
 		if (roomid && roomid !== 'lobby') data = '>' + roomid + '\n' + data;
 		Sockets.socketSend(this.worker, this.socketid, data);
-		Monitor.countNetworkUse(data.length);
+		ResourceMonitor.countNetworkUse(data.length);
 	};
 
 	Connection.prototype.send = function (data) {
 		Sockets.socketSend(this.worker, this.socketid, data);
-		Monitor.countNetworkUse(data.length);
+		ResourceMonitor.countNetworkUse(data.length);
 	};
 
 	Connection.prototype.destroy = function () {

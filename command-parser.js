@@ -15,11 +15,8 @@
  */
 
 /*
-
 To reload chat commands:
-
 /hotpatch chat
-
 */
 
 const MAX_MESSAGE_LENGTH = 300;
@@ -58,14 +55,11 @@ fs.readdirSync(path.resolve(__dirname, 'chat-plugins')).forEach(function (file) 
  * Modlog
  *********************************************************/
 
-var modlog = exports.modlog = {
-	lobby: fs.createWriteStream(path.resolve(__dirname, 'logs/modlog/modlog_lobby.txt'), {flags:'a+'}),
-	battle: fs.createWriteStream(path.resolve(__dirname, 'logs/modlog/modlog_battle.txt'), {flags:'a+'})
-};
+var modlog = exports.modlog = {lobby: fs.createWriteStream(LOGS_DIR + 'modlog/modlog_lobby.txt', {flags:'a+'}), battle: fs.createWriteStream(LOGS_DIR +'modlog/modlog_battle.txt', {flags:'a+'})};
 
 var writeModlog = exports.writeModlog = function (roomid, text) {
 	if (!modlog[roomid]) {
-		modlog[roomid] = fs.createWriteStream(path.resolve(__dirname, 'logs/modlog/modlog_' + roomid + '.txt'), {flags:'a+'});
+		modlog[roomid] = fs.createWriteStream(LOGS_DIR + 'modlog/modlog_' + roomid + '.txt', {flags:'a+'});
 	}
 	modlog[roomid].write('[' + (new Date().toJSON()) + '] ' + text + '\n');
 };
@@ -80,11 +74,11 @@ var writeModlog = exports.writeModlog = function (roomid, text) {
  */
 function canTalk(user, room, connection, message, targetUser) {
 	if (!user.named) {
-		connection.popup("You must choose a name before you can talk.");
+		connection.popup("Tienes que elegir un nombre de usuario antes de hablar.");
 		return false;
 	}
 	if (room && user.locked) {
-		connection.sendTo(room, "You are locked from talking in chat.");
+		connection.sendTo(room, "Estas bloqueado no puedes hablar en el chat.");
 		return false;
 	}
 	if (room && room.isMuted(user)) {
@@ -140,6 +134,7 @@ function canTalk(user, room, connection, message, targetUser) {
 			user.lastMessageTime = Date.now();
 		}
 
+		if (!Bot.parse.processChatData(user, room, connection, message)) return false;
 		if (Config.chatfilter) {
 			return Config.chatfilter.call(this, message, user, room, connection, targetUser);
 		}
@@ -179,7 +174,7 @@ var Context = exports.Context = (function () {
 		if (this.pmTarget) {
 			this.connection.send('|pm|' + this.user.getIdentity() + '|' + (this.pmTarget.getIdentity ? this.pmTarget.getIdentity() : ' ' + this.pmTarget) + '|/error ' + message);
 		} else {
-			this.sendReply('|html|<div class="message-error">' + Tools.escapeHTML(message) + '</div>');
+			this.connection.sendTo(this.room, '|html|<div class="message-error">' + Tools.escapeHTML(message) + '</div>');
 		}
 	};
 	Context.prototype.sendReplyBox = function (html) {
@@ -316,25 +311,12 @@ var Context = exports.Context = (function () {
 	Context.prototype.canHTML = function (html) {
 		html = '' + (html || '');
 		var images = html.match(/<img\b[^<>]*/ig);
-		if (images) {
-			if (this.room.isPersonal && !this.user.can('announce')) {
-				this.errorReply("Images are not allowed in personal rooms.");
+		if (!images) return true;
+		for (var i = 0; i < images.length; i++) {
+			if (!/width=([0-9]+|"[0-9]+")/i.test(images[i]) || !/height=([0-9]+|"[0-9]+")/i.test(images[i])) {
+				this.errorReply('All images must have a width and height attribute');
 				return false;
 			}
-			for (var i = 0; i < images.length; i++) {
-				if (!/width=([0-9]+|"[0-9]+")/i.test(images[i]) || !/height=([0-9]+|"[0-9]+")/i.test(images[i])) {
-					// Width and height are required because most browsers insert the
-					// <img> element before width and height are known, and when the
-					// image is loaded, this changes the height of the chat area, which
-					// messes up autoscrolling.
-					this.errorReply('All images must have a width and height attribute');
-					return false;
-				}
-			}
-		}
-		if ((this.room.isPersonal || this.room.isPrivate === true) && !this.user.can('lock') && html.match(/<button /)) {
-			this.errorReply('You do not have permission to use buttons in HTML.');
-			return false;
 		}
 		if (/>here.?</i.test(html) || /click here/i.test(html)) {
 			this.errorReply('Do not use "click here"');
@@ -378,6 +360,7 @@ var Context = exports.Context = (function () {
 		return this.targetUser;
 	};
 	Context.prototype.getLastIdOf = function (user) {
+		if (typeof user === 'string') user = Users.get(user);
 		return (user.named ? user.userid : (Object.keys(user.prevNames).last() || user.userid));
 	};
 	Context.prototype.splitTarget = function (target, exactName) {

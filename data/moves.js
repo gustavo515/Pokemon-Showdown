@@ -5233,7 +5233,7 @@ exports.BattleMovedex = {
 			return 80;
 		},
 		category: "Special",
-		desc: "If one of the user's allies chose to use Fire Pledge or Water Pledge this turn and has not moved yet, it takes its turn immediately after the user and the user's move does nothing. If combined with Fire Pledge, the ally uses Fire Pledge with 150 Base Power and a sea of fire appears on the target's side for 4 turns, which causes damage to non-Fire types equal to 1/8 of their maximum HP, rounded down, at the end of each turn during effect. If combined with Water Pledge, the ally uses Grass Pledge with 150 Base Power and a swamp appears on the target's side for 4 turns, which quarters the Speed of each Pokemon on that side. When used as a combined move, this move gains STAB no matter what the user's type is. This move does not consume the user's Grass Gem.",
+		desc: "If one of the user's allies chose to use Fire Pledge or Water Pledge this turn and has not moved yet, it takes its turn immediately after the user and the user's move does nothing. If combined with Fire Pledge, the ally uses Fire Pledge with 150 Base Power and a sea of fire appears on the target's side for 4 turns, which causes damage to non-Fire types equal to 1/8 of their maximum HP, rounded down, at the end of each turn during effect. If combined with Water Pledge, the ally uses Grass Pledge with 150 Base Power and a swamp appears on the target's side for 4 turns, which halves the Speed of each Pokemon on that side. When used as a combined move, this move gains STAB no matter what the user's type is. This move does not consume the user's Grass Gem.",
 		shortDesc: "Use with Fire or Water Pledge for added effect.",
 		id: "grasspledge",
 		name: "Grass Pledge",
@@ -7623,7 +7623,7 @@ exports.BattleMovedex = {
 				if (target !== source && target.side === this.effectData.target && this.getCategory(move) === 'Special') {
 					if (!move.crit && !move.infiltrates) {
 						this.debug('Light Screen weaken');
-						if (target.side.active.length > 1) return this.chainModify([0xA8F, 0x1000]);
+						if (target.side.active.length > 1) return this.chainModify(0.66);
 						return this.chainModify(0.5);
 					}
 				}
@@ -8963,7 +8963,7 @@ exports.BattleMovedex = {
 			onBasePower: function (basePower, attacker, defender, move) {
 				if (move.type === 'Electric') {
 					this.debug('mud sport weaken');
-					return this.chainModify([0x548, 0x1000]);
+					return this.chainModify([0x548, 0x1000]); // The Mud Sport modifier is slightly higher than the usual 0.33 modifier (0x547)
 				}
 			},
 			onResidualOrder: 21,
@@ -9054,7 +9054,6 @@ exports.BattleMovedex = {
 		priority: 0,
 		flags: {protect: 1, mirror: 1},
 		beforeMoveCallback: function (pokemon) {
-			if (pokemon.ignoringItem()) return;
 			var item = pokemon.getItem();
 			if (item.id && item.naturalGift) {
 				pokemon.addVolatile('naturalgift');
@@ -10369,9 +10368,7 @@ exports.BattleMovedex = {
 		accuracy: 100,
 		basePower: 0,
 		basePowerCallback: function (pokemon, target) {
-			var power = 60 + 20 * target.positiveBoosts();
-			if (power > 200) power = 200;
-			return power;
+			return 60 + 20 * target.positiveBoosts();
 		},
 		category: "Physical",
 		desc: "Power is equal to 60+(X*20), where X is the target's total stat stage changes that are greater than 0, but not more than 200 power.",
@@ -10812,7 +10809,7 @@ exports.BattleMovedex = {
 				if (target !== source && target.side === this.effectData.target && this.getCategory(move) === 'Physical') {
 					if (!move.crit && !move.infiltrates) {
 						this.debug('Reflect weaken');
-						if (target.side.active.length > 1) return this.chainModify([0xA8F, 0x1000]);
+						if (target.side.active.length > 1) return this.chainModify(0.66);
 						return this.chainModify(0.5);
 					}
 				}
@@ -15029,7 +15026,7 @@ exports.BattleMovedex = {
 			return 80;
 		},
 		category: "Special",
-		desc: "If one of the user's allies chose to use Fire Pledge or Grass Pledge this turn and has not moved yet, it takes its turn immediately after the user and the user's move does nothing. If combined with Fire Pledge, the ally uses Water Pledge with 150 Base Power and a rainbow appears on the user's side for 4 turns, which doubles secondary effect chances but does not stack with the Ability Serene Grace. If combined with Grass Pledge, the ally uses Grass Pledge with 150 Base Power and a swamp appears on the target's side for 4 turns, which quarters the Speed of each Pokemon on that side. When used as a combined move, this move gains STAB no matter what the user's type is. This move does not consume the user's Water Gem, and cannot be redirected by the Ability Storm Drain.",
+		desc: "If one of the user's allies chose to use Fire Pledge or Grass Pledge this turn and has not moved yet, it takes its turn immediately after the user and the user's move does nothing. If combined with Fire Pledge, the ally uses Water Pledge with 150 Base Power and a rainbow appears on the user's side for 4 turns, which doubles secondary effect chances but does not stack with the Ability Serene Grace. If combined with Grass Pledge, the ally uses Grass Pledge with 150 Base Power and a swamp appears on the target's side for 4 turns, which halves the Speed of each Pokemon on that side. When used as a combined move, this move gains STAB no matter what the user's type is. This move does not consume the user's Water Gem, and cannot be redirected by the Ability Storm Drain.",
 		shortDesc: "Use with Grass or Fire Pledge for added effect.",
 		id: "waterpledge",
 		name: "Water Pledge",
@@ -15133,7 +15130,7 @@ exports.BattleMovedex = {
 			onBasePower: function (basePower, attacker, defender, move) {
 				if (move.type === 'Fire') {
 					this.debug('water sport weaken');
-					return this.chainModify([0x548, 0x1000]);
+					return this.chainModify([0x548, 0x1000]); // The Water Sport modifier is slightly higher than the usual 0.33 modifier (0x547)
 				}
 			},
 			onResidualOrder: 21,
